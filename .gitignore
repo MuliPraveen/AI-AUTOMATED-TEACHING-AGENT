@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+backend/data/
+node_modules/
+.next/
+out/
+dist/
+build/
+.DS_Store
+*.log
+.pytest_cache/
+
+# spec doc lives on main
+Round 2 Technical Assessment.docx.pdf
+frontend/tsconfig.tsbuildinfo
