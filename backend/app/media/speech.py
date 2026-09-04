@@ -25,9 +25,13 @@ def _syllables(word: str) -> int:
     return max(1, len(_VOWELS.findall(word)))
 
 
-def estimate_timings(text: str, wpm: int | None = None) -> list[dict]:
-    """Word-level (start, end) seconds — syllable-weighted, punctuation-aware."""
-    wpm = wpm or settings.words_per_minute
+def estimate_timings(text: str, wpm: int | None = None, language: str = "en") -> list[dict]:
+    """Word-level (start, end) seconds — syllable-weighted, punctuation-aware.
+    Non-Latin scripts speak slower per word, so the rate is language-dependent."""
+    if wpm is None:
+        from app.core import i18n
+
+        wpm = i18n.wpm_for(language)
     base = 60.0 / wpm
     out, t = [], 0.0
     cursor = 0
@@ -68,14 +72,15 @@ def visemes(timings: list[dict]) -> list[dict]:
 
 class SpeechService:
     # ------------------------------------------------------------- TTS --- #
-    async def synthesize(self, text: str) -> dict:
-        timings = estimate_timings(text)
+    async def synthesize(self, text: str, language: str = "en") -> dict:
+        timings = estimate_timings(text, language=language)
         result = {
             "audio_url": None,
             "timings": timings,
             "visemes": visemes(timings),
             "duration": duration_of(timings),
             "engine": "estimated",
+            "language": language,
         }
         if not settings.tts_enabled:
             return result
@@ -90,7 +95,9 @@ class SpeechService:
                     },
                     json={
                         "text": text,
+                        # multilingual model: one voice speaks all supported languages
                         "model_id": "eleven_turbo_v2_5",
+                        "language_code": language.split("-")[0],
                         "voice_settings": {
                             "stability": 0.45,
                             "similarity_boost": 0.75,
@@ -109,14 +116,17 @@ class SpeechService:
         return result
 
     # ------------------------------------------------------------- STT --- #
-    async def transcribe(self, audio: bytes, mimetype: str = "audio/webm") -> str:
+    async def transcribe(
+        self, audio: bytes, mimetype: str = "audio/webm", language: str = "en"
+    ) -> str:
         if not settings.stt_enabled:
             return ""
+        lang = language.split("-")[0]
         try:
             async with httpx.AsyncClient(timeout=90) as c:
                 r = await c.post(
                     "https://api.deepgram.com/v1/listen"
-                    "?model=nova-2&smart_format=true&punctuate=true",
+                    f"?model=nova-2&smart_format=true&punctuate=true&language={lang}",
                     headers={
                         "Authorization": f"Token {settings.deepgram_api_key}",
                         "Content-Type": mimetype,

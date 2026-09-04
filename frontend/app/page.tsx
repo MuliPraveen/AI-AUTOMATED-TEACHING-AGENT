@@ -1,27 +1,30 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "@/lib/useSession";
 import { Lesson } from "@/components/Lesson";
-import { Dashboard, GraphPanel, PlanPanel, QuestionCard } from "@/components/Panels";
+import { Dashboard, GraphPanel, PlanPanel, QuestionCard, ReportCard } from "@/components/Panels";
+import { Setup } from "@/components/Setup";
+import type { LanguageOption } from "@/lib/types";
 
 type Tab = "lesson" | "plan" | "dashboard";
 
 export default function Home() {
   const s = useSession();
-  const [file, setFile] = useState<File | null>(null);
-  const [minutes, setMinutes] = useState(15);
   const [tab, setTab] = useState<Tab>("lesson");
+  const [langs, setLangs] = useState<LanguageOption[]>([]);
   const [auto, setAuto] = useState(true);
   const [ask, setAsk] = useState("");
   const [asked, setAsked] = useState<{ q: string; a: string } | null>(null);
   const [caps, setCaps] = useState<any>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { fetch("/api/health").then((r) => r.json()).then(setCaps).catch(() => {}); }, []);
+  useEffect(() => {
+    fetch("/api/health").then((r) => r.json()).then(setCaps).catch(() => {});
+    fetch("/api/languages").then((r) => r.json())
+      .then((d) => setLangs(d.languages)).catch(() => {});
+  }, []);
 
-  const begin = async () => {
-    if (!file) return;
-    const sid = await s.start(file, minutes);
+  const begin = async (input: { file?: File | null; topic?: string }, learner: any) => {
+    const sid = await s.start(input, learner);
     if (sid) setTimeout(() => s.next(), 400);
   };
 
@@ -46,6 +49,11 @@ export default function Home() {
           <span className="rounded-full border border-edge px-2 py-1">
             state: <span className="text-accent">{s.state}</span>
           </span>
+          {s.graph && (
+            <span className="rounded-full border border-edge px-2 py-1 text-zinc-500">
+              {s.graph.source} · {s.graph.subject} · {s.language}
+            </span>
+          )}
           {caps && (
             <span className="rounded-full border border-edge px-2 py-1 text-zinc-500">
               llm {caps.capabilities.llm ? "on" : "local"} · tts{" "}
@@ -56,33 +64,7 @@ export default function Home() {
       </header>
 
       {/* setup */}
-      {!s.sessionId && (
-        <div className="mx-auto max-w-xl rounded-2xl border border-edge bg-panel p-8">
-          <h2 className="mb-1 text-sm uppercase tracking-widest text-zinc-500">Start a session</h2>
-          <p className="mb-5 text-sm text-zinc-400">
-            Upload course material (PDF, Markdown or text). The agents extract a concept
-            DAG, allocate teaching time, then deliver a live narrated lesson.
-          </p>
-          <div onClick={() => fileInput.current?.click()}
-               onDragOver={(e) => e.preventDefault()}
-               onDrop={(e) => { e.preventDefault(); setFile(e.dataTransfer.files[0] ?? null); }}
-               className="cursor-pointer rounded-xl border border-dashed border-edge p-8 text-center hover:border-accent">
-            <input ref={fileInput} type="file" accept=".pdf,.md,.txt" hidden
-                   onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            <p className="text-sm text-zinc-300">{file ? file.name : "drop a file or click to browse"}</p>
-            <p className="mt-1 text-xs text-zinc-600">pdf · md · txt (max 25 MB)</p>
-          </div>
-          <label className="mt-5 block text-xs uppercase tracking-widest text-zinc-500">
-            Session length: <span className="text-accent">{minutes} min</span>
-          </label>
-          <input type="range" min={5} max={60} step={5} value={minutes}
-                 onChange={(e) => setMinutes(+e.target.value)} className="mt-2 w-full accent-emerald-400" />
-          <button disabled={!file || s.busy} onClick={begin}
-            className="mt-5 w-full rounded-xl bg-accent py-3 text-sm font-semibold text-black disabled:opacity-40">
-            {s.busy ? "ingesting & planning…" : "Start teaching"}
-          </button>
-        </div>
-      )}
+      {!s.sessionId && <Setup onStart={begin} busy={s.busy} />}
 
       {/* session */}
       {s.sessionId && (
@@ -136,8 +118,13 @@ export default function Home() {
               </div>
             )}
 
-            {tab === "dashboard" && s.profile && <Dashboard profile={s.profile} />}
-            {tab === "dashboard" && !s.profile && (
+            {tab === "dashboard" && (
+              <div className="space-y-4">
+                {s.report && <ReportCard report={s.report} />}
+                {s.profile && <Dashboard profile={s.profile} />}
+              </div>
+            )}
+            {tab === "dashboard" && !s.profile && !s.report && (
               <p className="text-sm text-zinc-600">Answer a check question to populate the profile.</p>
             )}
           </div>
@@ -157,6 +144,21 @@ export default function Home() {
                   auto
                 </button>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-edge bg-panel p-4">
+              <h3 className="mb-2 text-xs uppercase tracking-widest text-zinc-500">
+                Teaching language
+              </h3>
+              <select value={s.language}
+                onChange={(e) => s.switchLanguage(e.target.value)}
+                className="w-full rounded-lg border border-edge bg-black/40 px-2 py-1.5 text-xs">
+                {(langs.length ? langs : [{ code: "en", name: "English", native: "English" }])
+                  .map((l) => <option key={l.code} value={l.code}>{l.name} — {l.native}</option>)}
+              </select>
+              <p className="mt-1 text-[10px] text-zinc-600">
+                switches mid-lesson; progress is preserved
+              </p>
             </div>
 
             <div className="rounded-xl border border-edge bg-panel p-4">

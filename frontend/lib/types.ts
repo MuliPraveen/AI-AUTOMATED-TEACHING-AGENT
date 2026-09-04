@@ -71,7 +71,10 @@ export interface Concept {
   est_minutes: number; prerequisites: string[]; keywords: string[];
 }
 
-export interface KnowledgeGraph { doc_id: string; concepts: Concept[]; order: string[] }
+export interface KnowledgeGraph {
+  doc_id: string; concepts: Concept[]; order: string[];
+  subject: string; title: string; source: string;
+}
 
 export interface PlanItem {
   concept_id: string; name: string; minutes: number; depth: string; rationale: string;
@@ -79,3 +82,31 @@ export interface PlanItem {
 export interface LessonPlan { session_id: string; total_minutes: number; items: PlanItem[] }
 
 export interface WSEvent { type: string; payload: any }
+
+export type Level = "beginner" | "intermediate" | "advanced";
+
+export interface LearnerProfile {
+  level: Level;
+  language: string;
+  language_name: string;
+  minutes: number;
+  objective: string;
+  style: string;
+  prior_knowledge: string;
+}
+
+export interface LanguageOption { code: string; name: string; native: string }
+
+export interface LearningReport {
+  topic: string;
+  score_pct: number;
+  grade: string;
+  concepts_understood: string[];
+  weak_areas: string[];
+  incorrect_concepts: string[];
+  misconceptions: string[];
+  recommended_revision: string[];
+  suggested_next_topic: string;
+  time_spent_minutes: number;
+  summary: string;
+}

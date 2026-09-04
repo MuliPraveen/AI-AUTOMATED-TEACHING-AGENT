@@ -33,6 +33,9 @@ class KnowledgeGraph(BaseModel):
     doc_id: str
     concepts: list[Concept] = []
     order: list[str] = []  # topological teaching order
+    subject: str = "general"
+    title: str = ""
+    source: str = "document"  # "document" | "topic"
 
 
 # --------------------------------------------------------------------------- #
@@ -42,6 +45,36 @@ class Depth(str, Enum):
     OVERVIEW = "overview"
     STANDARD = "standard"
     DEEP = "deep"
+
+
+class Level(str, Enum):
+    """§6 Personalized Teaching — drives terminology, examples and rigor."""
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+class Subject(str, Enum):
+    """§10 Subject-Aware Visual Explanation — selects the visual grammar."""
+    MATH = "mathematics"
+    PHYSICS = "physics"
+    CHEMISTRY = "chemistry"
+    BIOLOGY = "biology"
+    HISTORY = "history"
+    PROGRAMMING = "programming"
+    ECONOMICS = "economics"
+    GENERAL = "general"
+
+
+class LearnerProfile(BaseModel):
+    """Everything the student may specify (§6, §7, §8)."""
+    level: Level = Level.BEGINNER
+    language: str = "en"          # BCP-47; teaching language
+    language_name: str = "English"
+    minutes: float = 20.0
+    objective: str = ""
+    style: str = ""               # e.g. "analogies", "exam-focused"
+    prior_knowledge: str = ""
 
 
 class LessonPlanItem(BaseModel):
@@ -127,6 +160,21 @@ class StudentProfile(BaseModel):
     gaps: list[str] = []
     next_steps: list[str] = []
     timeline: list[dict[str, Any]] = []
+
+
+class LearningReport(BaseModel):
+    """§13 Assessment and Feedback — the end-of-lesson report card."""
+    topic: str
+    score_pct: int
+    grade: str
+    concepts_understood: list[str] = []
+    weak_areas: list[str] = []
+    incorrect_concepts: list[str] = []
+    misconceptions: list[str] = []
+    recommended_revision: list[str] = []
+    suggested_next_topic: str = ""
+    time_spent_minutes: float = 0.0
+    summary: str = ""
 
 
 # --------------------------------------------------------------------------- #

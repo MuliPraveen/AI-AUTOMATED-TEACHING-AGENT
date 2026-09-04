@@ -157,9 +157,18 @@ class AssessmentAgent:
         return steps
 
     # ----------------------------------------------------------- quizzing --
-    async def final_quiz(self, kg: KnowledgeGraph, profile: StudentProfile, n: int = 5
-                         ) -> list[Question]:
+    async def final_quiz(
+        self,
+        kg: KnowledgeGraph,
+        profile: StudentProfile,
+        n: int = 5,
+        learner: "LearnerProfile | None" = None,
+    ) -> list[Question]:
         """Weighted toward weak concepts (spaced-repetition style selection)."""
+        from app.core import i18n
+        from app.core.schemas import LearnerProfile
+
+        learner = learner or LearnerProfile()
         ranked = sorted(
             kg.concepts,
             key=lambda c: profile.mastery.get(c.id).mastery if c.id in profile.mastery else 0.0,
@@ -168,7 +177,9 @@ class AssessmentAgent:
         out: list[Question] = []
         for c in picks:
             data = await llm.json_call(
-                "Write one exam MCQ. Distractors must encode realistic misconceptions.",
+                "Write one exam MCQ. Distractors must encode realistic misconceptions. "
+                f"Pitch it at a {learner.level.value} learner. "
+                + i18n.instruction_for(learner.language, learner.language_name),
                 f"Concept: {c.name}\nSummary: {c.summary[:600]}\n"
                 'JSON: {"prompt":"","options":["","","",""],"answer_index":0,'
                 '"distractor_map":{"1":"tag"},"bloom":"apply"}',

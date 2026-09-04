@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 
+from app.core import i18n
 from app.core.config import settings
 from app.core.llm import llm
 from app.core.schemas import (
@@ -19,8 +20,10 @@ from app.core.schemas import (
     Concept,
     Depth,
     KnowledgeGraph,
+    LearnerProfile,
     LessonPlan,
     LessonPlanItem,
+    Level,
     Question,
     StudentProfile,
     TeachingTurn,
@@ -31,11 +34,48 @@ from app.ingest.vector_store import store
 SYSTEM_TEACH = """You are an expert human teacher delivering a live spoken lesson.
 Rules:
 - Narration is SPOKEN prose: no markdown, no bullet symbols, no LaTeX in narration.
-- Teach with a concrete example or analogy before the formal definition.
+- Teach like a real classroom teacher: hook the student, give a concrete example or
+  analogy BEFORE the formal definition, then check understanding.
 - Ground every claim in the provided context; never invent facts beyond it.
-- Put formulas in a latex block, algorithms in a code block, processes in a mermaid block.
 - cue_at_char = the narration character offset where the visual should appear.
-- End with one check-for-understanding MCQ whose wrong options encode real misconceptions."""
+- End with one check-for-understanding question whose wrong options encode real,
+  specific misconceptions a student of this level would actually hold."""
+
+# §6 Personalized Teaching — level drives terminology, examples and rigor.
+LEVEL_STYLE: dict[Level, str] = {
+    Level.BEGINNER: (
+        "Learner is a BEGINNER. Use everyday language and familiar analogies. Define every "
+        "technical term the moment you use it. Prefer intuition over formalism; use at most "
+        "one simple formula. Be encouraging and concrete."
+    ),
+    Level.INTERMEDIATE: (
+        "Learner is INTERMEDIATE. Assume the basics are known. Use correct technical "
+        "terminology, give practical worked examples, and show the reasoning steps."
+    ),
+    Level.ADVANCED: (
+        "Learner is ADVANCED. Use precise technical terminology, include the mathematics or "
+        "implementation details, discuss edge cases, trade-offs and why naive approaches fail."
+    ),
+}
+
+# §10 Subject-Aware Visual Explanation — each subject gets its own visual grammar.
+SUBJECT_VISUALS: dict[str, str] = {
+    "mathematics": "Use latex blocks for equations and step-by-step derivations; a mermaid "
+                   "block for solution procedure. Show each algebraic step separately.",
+    "physics": "Use latex for formulas and mermaid for force/circuit/process diagrams. "
+               "Always state units and the physical intuition behind each symbol.",
+    "chemistry": "Use latex for balanced equations and mermaid for reaction pathways and "
+                 "mechanisms.",
+    "biology": "Use mermaid flowcharts for biological processes and labeled structures; "
+               "describe diagrams the student should picture.",
+    "history": "Use a mermaid timeline or graph of causes and consequences; anchor every "
+               "event to a date.",
+    "programming": "Use runnable code blocks with the correct language tag, plus a mermaid "
+                   "block for execution flow or architecture. Show expected output.",
+    "economics": "Use latex for formulas and mermaid for supply/demand or flow relationships.",
+    "general": "Use a mermaid diagram to structure the idea; add latex or code only if the "
+               "material genuinely calls for it.",
+}
 
 
 def _depth_for(minutes: float) -> Depth:
@@ -102,25 +142,54 @@ class TeachingAgent:
 
     # ------------------------------------------------------------ teach --- #
     async def teach(
-        self, concept: Concept, item: LessonPlanItem, *, remediation: str | None = None
+        self,
+        concept: Concept,
+        item: LessonPlanItem,
+        *,
+        remediation: str | None = None,
+        learner: LearnerProfile | None = None,
+        subject: str = "general",
+        attempt: int = 0,
     ) -> TeachingTurn:
+        learner = learner or LearnerProfile()
         context = self._context_for(concept)
-        words = int(item.minutes * settings.words_per_minute)
+        wpm = i18n.wpm_for(learner.language)
+        words = int(item.minutes * wpm)
+
+        # §12: on re-explanation, force a *different* analogy rather than a repeat.
+        remediation_clause = ""
+        if remediation:
+            remediation_clause = (
+                f"RE-EXPLANATION (attempt {attempt + 1}). The student answered incorrectly and "
+                f"appears to hold this misconception: '{remediation}'. Do NOT repeat your "
+                f"previous explanation. Name the misconception explicitly, show with a "
+                f"counter-example why it fails, then re-teach using a COMPLETELY DIFFERENT "
+                f"analogy from a different domain. Finish with a new, easier question.\n"
+            )
+
         instruction = (
-            f"Concept: {concept.name}\nDepth: {item.depth.value}\n"
-            f"Narration length: about {words} words.\n"
-            + (f"REMEDIATION: the student holds this misconception -> {remediation}. "
-               "Directly confront and correct it with a counter-example.\n" if remediation else "")
-            + f"\nCONTEXT:\n{context}\n\n"
+            f"Concept: {concept.name}\nSubject: {subject}\nDepth: {item.depth.value}\n"
+            f"{LEVEL_STYLE[learner.level]}\n"
+            f"{i18n.instruction_for(learner.language, learner.language_name)}\n"
+            f"VISUALS: {SUBJECT_VISUALS.get(subject, SUBJECT_VISUALS['general'])}\n"
+            + (f"Learning objective: {learner.objective}\n" if learner.objective else "")
+            + (f"Preferred style: {learner.style}\n" if learner.style else "")
+            + f"Narration length: about {words} words.\n"
+            + remediation_clause
+            + f"\nCONTEXT (may be in a different language — explain it in "
+              f"{learner.language_name}):\n{context}\n\n"
             'JSON schema: {"narration":"","blocks":[{"type":"latex|code|mermaid|text",'
             '"content":"","language":"python","caption":"","cue_at_char":0}],'
-            '"check_question":{"prompt":"","options":["","","",""],"answer_index":0,'
-            '"distractor_map":{"1":"misconception tag","2":"...","3":"..."},'
+            '"check_question":{"prompt":"","kind":"mcq","options":["","","",""],'
+            '"answer_index":0,"distractor_map":{"1":"misconception tag","2":"...","3":"..."},'
             '"bloom":"understand"}}'
         )
-        data = await llm.json_call(SYSTEM_TEACH, instruction, fallback=None, temperature=0.4)
+        data = await llm.json_call(
+            SYSTEM_TEACH, instruction, fallback=None, temperature=0.45 + 0.15 * attempt
+        )
         if not isinstance(data, dict) or not data.get("narration"):
-            return self._fallback_turn(concept, item, context, remediation)
+            return await self._fallback_turn(concept, item, context, remediation, learner,
+                                             subject)
         narration = self._sanitize(str(data["narration"]))
         blocks = self._blocks_from(data.get("blocks", []), len(narration))
         q = self._question_from(data.get("check_question"), concept)
@@ -201,13 +270,19 @@ class TeachingAgent:
             bloom=str(raw.get("bloom", "understand")),  # type: ignore[arg-type]
         )
 
-    def _fallback_turn(
-        self, concept: Concept, item: LessonPlanItem, context: str, remediation: str | None
+    async def _fallback_turn(
+        self,
+        concept: Concept,
+        item: LessonPlanItem,
+        context: str,
+        remediation: str | None,
+        learner: LearnerProfile,
+        subject: str = "general",
     ) -> TeachingTurn:
         """Deterministic, source-grounded lesson used when no LLM key is present.
         It extracts real sentences from the document so the demo is never empty."""
         sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", context) if len(s.strip()) > 40]
-        budget = int(item.minutes * settings.words_per_minute)
+        budget = int(item.minutes * i18n.wpm_for(learner.language))
         body, count = [], 0
         for s in sents:
             body.append(s)
@@ -224,16 +299,9 @@ class TeachingAgent:
             + " ".join(body)
             + f" To summarize, {concept.name} matters because it underpins the ideas that follow."
         )
-        blocks = [
-            VisualBlock(
-                type=BlockType.MERMAID,
-                content="graph LR\n  A[Input] --> B["
-                + concept.name.replace("[", "").replace("]", "")[:28]
-                + "] --> C[Outcome]",
-                caption=f"{concept.name} at a glance",
-                cue_at_char=min(120, len(narration) // 4),
-            )
-        ]
+        # §8: localize the offline narration too, when an LLM is reachable.
+        narration = await i18n.translate(narration, learner.language, learner.language_name)
+        blocks = [self._default_visual(concept, subject, narration)]
         q = Question(
             id=f"{concept.id}-q0",
             concept_id=concept.id,
@@ -253,6 +321,36 @@ class TeachingAgent:
         )
         return TeachingTurn(concept_id=concept.id, narration=narration, blocks=blocks,
                             check_question=q)
+
+    @staticmethod
+    def _default_visual(concept: Concept, subject: str, narration: str) -> VisualBlock:
+        """§10 offline path: pick the visual grammar that fits the subject."""
+        safe = re.sub(r"[\[\]()\"']", "", concept.name)[:30]
+        cue = min(120, max(20, len(narration) // 4))
+        if subject == "programming":
+            return VisualBlock(
+                type=BlockType.CODE,
+                content=f"# {safe}\ndef demo():\n    \"\"\"{concept.summary[:70]}\"\"\"\n"
+                        f"    result = ...  # apply {safe}\n    return result",
+                language="python", caption=f"{concept.name} in code", cue_at_char=cue,
+            )
+        if subject == "history":
+            return VisualBlock(
+                type=BlockType.MERMAID,
+                content=f"graph LR\n  A[Causes] --> B[{safe}] --> C[Consequences]",
+                caption=f"{concept.name}: causes and consequences", cue_at_char=cue,
+            )
+        if subject in ("mathematics", "physics", "economics"):
+            return VisualBlock(
+                type=BlockType.MERMAID,
+                content=f"graph TD\n  A[Given] --> B[Apply {safe}] --> C[Result]",
+                caption=f"{concept.name}: solution procedure", cue_at_char=cue,
+            )
+        return VisualBlock(
+            type=BlockType.MERMAID,
+            content=f"graph LR\n  A[Input] --> B[{safe}] --> C[Outcome]",
+            caption=f"{concept.name} at a glance", cue_at_char=cue,
+        )
 
 
 teaching_agent = TeachingAgent()

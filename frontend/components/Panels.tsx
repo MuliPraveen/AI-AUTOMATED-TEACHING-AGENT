@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
-import type { Evaluation, KnowledgeGraph, LessonPlan, Question, StudentProfile } from "@/lib/types";
+import type {
+  Evaluation, KnowledgeGraph, LearningReport, LessonPlan, Question, StudentProfile,
+} from "@/lib/types";
 
 /* ------------------------------------------------------- knowledge graph */
 export function GraphPanel({ graph }: { graph: KnowledgeGraph }) {
@@ -173,6 +175,89 @@ export function Dashboard({ profile }: { profile: StudentProfile }) {
           </ol>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------- §13 learning report -- */
+export function ReportCard({ report }: { report: LearningReport }) {
+  const color = report.score_pct >= 75 ? "text-accent"
+    : report.score_pct >= 50 ? "text-warn" : "text-red-400";
+  return (
+    <div className="rounded-xl border border-edge bg-panel p-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-xs uppercase tracking-widest text-zinc-500">Learning report</h3>
+          <p className="mt-1 text-lg text-zinc-100">{report.topic}</p>
+        </div>
+        <div className="text-right">
+          <div className={`text-3xl font-semibold ${color}`}>{report.score_pct}%</div>
+          <div className="font-mono text-xs text-zinc-500">
+            grade {report.grade} · {report.time_spent_minutes}m
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm text-zinc-300">{report.summary}</p>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Section title="Concepts understood" items={report.concepts_understood} tone="accent" />
+        <Section title="Needs improvement" items={report.weak_areas} tone="warn" />
+      </div>
+
+      {report.misconceptions.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-widest text-zinc-500">
+            Misconceptions detected
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {report.misconceptions.map((m) => (
+              <span key={m} className="rounded-full border border-warn/40 px-2 py-0.5 font-mono text-[10px] text-warn">
+                {m.replace(/-/g, " ")}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {report.recommended_revision.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-widest text-zinc-500">
+            Recommended revision
+          </div>
+          <ol className="mt-1 space-y-1">
+            {report.recommended_revision.map((r, i) => (
+              <li key={i} className="flex gap-2 text-sm text-zinc-300">
+                <span className="font-mono text-xs text-accent2">{i + 1}.</span>{r}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <div className="mt-4 rounded-lg border border-accent2/40 bg-accent2/5 p-3">
+        <span className="text-[10px] uppercase tracking-widest text-zinc-500">
+          Suggested next topic
+        </span>
+        <p className="text-sm text-zinc-100">{report.suggested_next_topic}</p>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, items, tone }: { title: string; items: string[]; tone: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-widest text-zinc-500">{title}</div>
+      {items.length ? (
+        <ul className="mt-1 space-y-0.5">
+          {items.map((x) => (
+            <li key={x} className={`text-sm ${tone === "accent" ? "text-accent" : "text-warn"}`}>
+              {x}
+            </li>
+          ))}
+        </ul>
+      ) : <p className="mt-1 text-sm text-zinc-600">—</p>}
     </div>
   );
 }
